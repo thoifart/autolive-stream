@@ -1,0 +1,215 @@
+name: AutoLive Pro Independent Multi-Channel Engine
+
+on:
+  workflow_dispatch:
+    inputs:
+      stream_name:
+        description: 'Channel Name'
+        required: false
+        default: 'AutoLive Pro'
+      stream_url:
+        description: 'RTMP Ingest Server URL'
+        required: true
+        default: 'rtmp://a.rtmp.youtube.com/live2'
+      stream_key:
+        description: 'Stream Key'
+        required: true
+        default: ''
+      video_url:
+        description: 'Direct Video MP4 URL'
+        required: true
+        default: ''
+      video_url_2:
+        description: 'Secondary Video URL'
+        required: false
+        default: ''
+      video_url_3:
+        description: 'Third Video URL'
+        required: false
+        default: ''
+      aspect_ratio:
+        description: 'Aspect Ratio (16:9 or 9:16)'
+        required: false
+        default: '16:9'
+      auto_reconnect:
+        description: 'Auto Reconnect (true/false)'
+        required: false
+        default: 'true'
+      # Backwards-compatible inputs for per-channel dispatch
+      c1_name: { description: 'Ch1 Name', required: false, default: '' }
+      c1_url: { description: 'Ch1 URL', required: false, default: '' }
+      c1_key: { description: 'Ch1 Key', required: false, default: '' }
+      c1_video: { description: 'Ch1 Video', required: false, default: '' }
+      c2_name: { description: 'Ch2 Name', required: false, default: '' }
+      c2_url: { description: 'Ch2 URL', required: false, default: '' }
+      c2_key: { description: 'Ch2 Key', required: false, default: '' }
+      c2_video: { description: 'Ch2 Video', required: false, default: '' }
+      c3_name: { description: 'Ch3 Name', required: false, default: '' }
+      c3_url: { description: 'Ch3 URL', required: false, default: '' }
+      c3_key: { description: 'Ch3 Key', required: false, default: '' }
+      c3_video: { description: 'Ch3 Video', required: false, default: '' }
+      c4_name: { description: 'Ch4 Name', required: false, default: '' }
+      c4_url: { description: 'Ch4 URL', required: false, default: '' }
+      c4_key: { description: 'Ch4 Key', required: false, default: '' }
+      c4_video: { description: 'Ch4 Video', required: false, default: '' }
+      c5_name: { description: 'Ch5 Name', required: false, default: '' }
+      c5_url: { description: 'Ch5 URL', required: false, default: '' }
+      c5_key: { description: 'Ch5 Key', required: false, default: '' }
+      c5_video: { description: 'Ch5 Video', required: false, default: '' }
+
+jobs:
+  broadcast:
+    name: Cloud Live Streaming Engine
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install FFmpeg & Tools
+        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg curl ca-certificates
+
+      - name: Start Cloud Stream
+        env:
+          STREAM_NAME: ${{ github.event.inputs.stream_name }}
+          STREAM_URL: ${{ github.event.inputs.stream_url }}
+          STREAM_KEY: ${{ github.event.inputs.stream_key }}
+          VIDEO_URL: ${{ github.event.inputs.video_url }}
+          VIDEO_URL_2: ${{ github.event.inputs.video_url_2 }}
+          VIDEO_URL_3: ${{ github.event.inputs.video_url_3 }}
+          ASPECT_RATIO: ${{ github.event.inputs.aspect_ratio }}
+          AUTO_RECONNECT: ${{ github.event.inputs.auto_reconnect }}
+          C1_NAME: ${{ github.event.inputs.c1_name }}
+          C1_URL: ${{ github.event.inputs.c1_url }}
+          C1_KEY: ${{ github.event.inputs.c1_key }}
+          C1_VIDEO: ${{ github.event.inputs.c1_video }}
+          C2_NAME: ${{ github.event.inputs.c2_name }}
+          C2_URL: ${{ github.event.inputs.c2_url }}
+          C2_KEY: ${{ github.event.inputs.c2_key }}
+          C2_VIDEO: ${{ github.event.inputs.c2_video }}
+          C3_NAME: ${{ github.event.inputs.c3_name }}
+          C3_URL: ${{ github.event.inputs.c3_url }}
+          C3_KEY: ${{ github.event.inputs.c3_key }}
+          C3_VIDEO: ${{ github.event.inputs.c3_video }}
+          C4_NAME: ${{ github.event.inputs.c4_name }}
+          C4_URL: ${{ github.event.inputs.c4_url }}
+          C4_KEY: ${{ github.event.inputs.c4_key }}
+          C4_VIDEO: ${{ github.event.inputs.c4_video }}
+          C5_NAME: ${{ github.event.inputs.c5_name }}
+          C5_URL: ${{ github.event.inputs.c5_url }}
+          C5_KEY: ${{ github.event.inputs.c5_key }}
+          C5_VIDEO: ${{ github.event.inputs.c5_video }}
+        run: |
+          launch_stream() {
+            local NAME="$1"
+            local URL="$2"
+            local KEY="$3"
+            local VIDEO="$4"
+            local ASPECT="$5"
+            local RECONNECT="$6"
+
+            # Strip trailing slash from RTMP URL
+            URL="${URL%/}"
+            # Trim whitespace and newlines from Stream Key & Video URL
+            KEY=$(echo "$KEY" | tr -d '\r\n ')
+            VIDEO=$(echo "$VIDEO" | tr -d '\r\n ')
+
+            if [ -z "$URL" ] || [ -z "$KEY" ]; then
+              echo "[INFO] Skipping empty stream configuration."
+              return 0
+            fi
+
+            echo "=============================================="
+            echo "[INFO] Launching Stream: $NAME"
+            echo "[INFO] RTMP Server: $URL"
+            echo "[INFO] Video Source: $VIDEO"
+            echo "[INFO] Target Aspect: ${ASPECT:-16:9}"
+            echo "=============================================="
+
+            if [ -z "$VIDEO" ]; then
+              echo "[ERROR] Video URL is missing! Please provide a direct .mp4 video URL."
+              return 1
+            fi
+
+            # Check HTTP accessibility of the video URL
+            echo "[INFO] Checking video accessibility via HTTP HEAD..."
+            local HTTP_CODE=$(curl -s -L -I -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 15 "$VIDEO" || echo "000")
+            echo "[INFO] Video HTTP Status: $HTTP_CODE"
+
+            if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "206" ] && [ "$HTTP_CODE" != "302" ]; then
+              echo "[WARN] Video URL returned HTTP $HTTP_CODE. If this video does not play, verify the link is a direct public .mp4 URL."
+            fi
+
+            # Check if video has an audio stream
+            echo "[INFO] Analyzing media streams with ffprobe..."
+            local HAS_AUDIO=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_type -of default=noprint_wrappers=1:nokey=1 "$VIDEO" 2>/dev/null || echo "")
+
+            # Set video filter based on aspect ratio
+            local VF_FILTER="scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1"
+            if [ "$ASPECT" = "9:16" ]; then
+              VF_FILTER="scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1"
+            fi
+
+            local RTMP_TARGET="${URL}/${KEY}"
+            local RETRY=0
+            local MAX_RETRIES=500
+
+            while [ $RETRY -lt $MAX_RETRIES ]; do
+              echo "[INFO] Starting FFmpeg process (Attempt $((RETRY+1)) of $MAX_RETRIES)..."
+              echo "[INFO] Ingest Destination: ${URL}/****"
+
+              if [ "$HAS_AUDIO" = "audio" ]; then
+                echo "[INFO] Audio track detected. Streaming video with native audio track..."
+                ffmpeg -hide_banner -loglevel info \
+                  -re -stream_loop -1 \
+                  -i "$VIDEO" \
+                  -vf "$VF_FILTER" \
+                  -c:v libx264 -preset veryfast -b:v 3000k -maxrate 3500k -bufsize 6000k \
+                  -pix_fmt yuv420p -g 60 -keyint_min 60 -sc_threshold 0 \
+                  -c:a aac -b:a 128k -ar 44100 -ac 2 \
+                  -flvflags no_duration_filesize \
+                  -f flv "$RTMP_TARGET"
+              else
+                echo "[INFO] No audio track found. Injecting compliant silent AAC audio for YouTube..."
+                ffmpeg -hide_banner -loglevel info \
+                  -re -stream_loop -1 \
+                  -i "$VIDEO" \
+                  -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 \
+                  -vf "$VF_FILTER" \
+                  -c:v libx264 -preset veryfast -b:v 3000k -maxrate 3500k -bufsize 6000k \
+                  -pix_fmt yuv420p -g 60 -keyint_min 60 -sc_threshold 0 \
+                  -map 0:v:0 -map 1:a:0 -shortest \
+                  -c:a aac -b:a 128k -ar 44100 -ac 2 \
+                  -flvflags no_duration_filesize \
+                  -f flv "$RTMP_TARGET"
+              fi
+
+              local EXIT_CODE=$?
+              echo "[WARN] FFmpeg exited with code $EXIT_CODE"
+
+              if [ "$RECONNECT" = "false" ]; then
+                echo "[INFO] Auto-reconnect is disabled. Exiting stream loop."
+                break
+              fi
+
+              RETRY=$((RETRY+1))
+              echo "[INFO] Reconnecting stream in 5 seconds (Attempt $RETRY)..."
+              sleep 5
+            done
+          }
+
+          # Check if primary stream inputs were provided
+          if [ -n "$STREAM_KEY" ] || [ -n "$STREAM_URL" ]; then
+            launch_stream "$STREAM_NAME" "$STREAM_URL" "$STREAM_KEY" "$VIDEO_URL" "$ASPECT_RATIO" "$AUTO_RECONNECT"
+          elif [ -n "$C1_KEY" ] || [ -n "$C1_URL" ]; then
+            launch_stream "$C1_NAME" "$C1_URL" "$C1_KEY" "$C1_VIDEO" "$ASPECT_RATIO" "$AUTO_RECONNECT" &
+            if [ -n "$C2_KEY" ]; then launch_stream "$C2_NAME" "$C2_URL" "$C2_KEY" "$C2_VIDEO" "$ASPECT_RATIO" "$AUTO_RECONNECT" & fi
+            if [ -n "$C3_KEY" ]; then launch_stream "$C3_NAME" "$C3_URL" "$C3_KEY" "$C3_VIDEO" "$ASPECT_RATIO" "$AUTO_RECONNECT" & fi
+            if [ -n "$C4_KEY" ]; then launch_stream "$C4_NAME" "$C4_URL" "$C4_KEY" "$C4_VIDEO" "$ASPECT_RATIO" "$AUTO_RECONNECT" & fi
+            if [ -n "$C5_KEY" ]; then launch_stream "$C5_NAME" "$C5_URL" "$C5_KEY" "$C5_VIDEO" "$ASPECT_RATIO" "$AUTO_RECONNECT" & fi
+            wait
+          else
+            echo "[ERROR] No valid stream parameters received!"
+            exit 1
+          fi
+
+          echo "[INFO] Stream process completed."
