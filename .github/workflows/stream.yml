@@ -35,6 +35,34 @@ on:
         description: 'Auto Reconnect (true/false)'
         required: false
         default: 'true'
+      cpu_preset:
+        description: 'FFmpeg CPU Performance Preset'
+        required: false
+        default: 'veryfast'
+      simulcast_url:
+        description: 'Simulcast 1 RTMP URL (Pro)'
+        required: false
+        default: ''
+      simulcast_key:
+        description: 'Simulcast 1 Stream Key (Pro)'
+        required: false
+        default: ''
+      simulcast_2_url:
+        description: 'Simulcast 2 RTMP URL (Pro)'
+        required: false
+        default: ''
+      simulcast_2_key:
+        description: 'Simulcast 2 Stream Key (Pro)'
+        required: false
+        default: ''
+      watermark_text:
+        description: 'Watermark Text (Pro)'
+        required: false
+        default: ''
+      webhook_url:
+        description: 'Webhook URL (Pro)'
+        required: false
+        default: ''
 
 jobs:
   broadcast:
@@ -57,6 +85,13 @@ jobs:
           VIDEO_URL_3: ${{ github.event.inputs.video_url_3 }}
           ASPECT_RATIO: ${{ github.event.inputs.aspect_ratio }}
           AUTO_RECONNECT: ${{ github.event.inputs.auto_reconnect }}
+          CPU_PRESET: ${{ github.event.inputs.cpu_preset }}
+          SIMULCAST_URL: ${{ github.event.inputs.simulcast_url }}
+          SIMULCAST_KEY: ${{ github.event.inputs.simulcast_key }}
+          SIMULCAST_2_URL: ${{ github.event.inputs.simulcast_2_url }}
+          SIMULCAST_2_KEY: ${{ github.event.inputs.simulcast_2_key }}
+          WATERMARK_TEXT: ${{ github.event.inputs.watermark_text }}
+          WEBHOOK_URL: ${{ github.event.inputs.webhook_url }}
         run: |
           launch_stream() {
             local NAME="$1"
@@ -65,11 +100,21 @@ jobs:
             local VIDEO="$4"
             local ASPECT="$5"
             local RECONNECT="$6"
+            local PRESET="${7:-veryfast}"
+            local S_URL="$8"
+            local S_KEY="$9"
+            local S2_URL="${10}"
+            local S2_KEY="${11}"
+            local W_TEXT="${12}"
 
             # Strip trailing slash from RTMP URL
             URL="${URL%/}"
+            S_URL="${S_URL%/}"
+            S2_URL="${S2_URL%/}"
             # Trim whitespace and newlines from Stream Key & Video URL
             KEY=$(echo "$KEY" | tr -d '\r\n ')
+            S_KEY=$(echo "$S_KEY" | tr -d '\r\n ')
+            S2_KEY=$(echo "$S2_KEY" | tr -d '\r\n ')
             VIDEO=$(echo "$VIDEO" | tr -d '\r\n ')
 
             if [ -z "$URL" ] || [ -z "$KEY" ]; then
@@ -79,9 +124,13 @@ jobs:
 
             echo "=============================================="
             echo "[INFO] Launching Stream: $NAME"
-            echo "[INFO] RTMP Server: $URL"
+            echo "[INFO] Primary RTMP: $URL"
+            [ -n "$S_URL" ] && echo "[INFO] Simulcast 1 RTMP: $S_URL (Pro)"
+            [ -n "$S2_URL" ] && echo "[INFO] Simulcast 2 RTMP: $S2_URL (Pro)"
+            [ -n "$W_TEXT" ] && echo "[INFO] Watermark: $W_TEXT (Pro)"
             echo "[INFO] Video Source: $VIDEO"
             echo "[INFO] Target Aspect: ${ASPECT:-16:9}"
+            echo "[INFO] CPU Preset: $PRESET"
             echo "=============================================="
 
             if [ -z "$VIDEO" ]; then
@@ -89,62 +138,71 @@ jobs:
               return 1
             fi
 
-            # Check HTTP accessibility of the video URL
-            echo "[INFO] Checking video accessibility via HTTP HEAD..."
-            local HTTP_CODE=$(curl -s -L -I -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 15 "$VIDEO" || echo "000")
-            echo "[INFO] Video HTTP Status: $HTTP_CODE"
-
-            if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "206" ] && [ "$HTTP_CODE" != "302" ]; then
-              echo "[WARN] Video URL returned HTTP $HTTP_CODE. If this video does not play, verify the link is a direct public .mp4 URL."
-            fi
-
-            # Check if video has an audio stream
-            echo "[INFO] Analyzing media streams with ffprobe..."
-            local HAS_AUDIO=$(ffprobe -v error -user_agent "Mozilla/5.0" -select_streams a:0 -show_entries stream=codec_type -of default=noprint_wrappers=1:nokey=1 "$VIDEO" 2>/dev/null || echo "")
-            echo "[INFO] Video Audio Stream Status: ${HAS_AUDIO:-No audio track detected}"
-
-            # Set video filter based on aspect ratio
+            # Set video filter based on aspect ratio & watermark
             local VF_FILTER="scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1"
             if [ "$ASPECT" = "9:16" ]; then
               VF_FILTER="scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1"
             fi
+            if [ -n "$W_TEXT" ]; then
+              VF_FILTER="${VF_FILTER},drawtext=text='$W_TEXT':fontcolor=white:fontsize=24:x=w-tw-20:y=h-th-20:box=1:boxcolor=black@0.5:boxborderw=6"
+            fi
 
             local RTMP_TARGET="${URL}/${KEY}"
+            local S_TARGET=""
+            [ -n "$S_URL" ] && [ -n "$S_KEY" ] && S_TARGET="${S_URL}/${S_KEY}"
+
+            local S2_TARGET=""
+            [ -n "$S2_URL" ] && [ -n "$S2_KEY" ] && S2_TARGET="${S2_URL}/${S2_KEY}"
+
             local RETRY=0
             local MAX_RETRIES=500
 
             while [ $RETRY -lt $MAX_RETRIES ]; do
-              echo "[INFO] Starting FFmpeg process (Attempt $((RETRY+1)) of $MAX_RETRIES)..."
-              echo "[INFO] Ingest Destination: ${URL}/****"
+              echo "[INFO] Starting FFmpeg process with preset '$PRESET' (Attempt $((RETRY+1)) of $MAX_RETRIES)..."
 
-              if [ "$HAS_AUDIO" = "audio" ]; then
-                echo "[INFO] Audio track detected! Streaming video with its native audio track..."
+              # Launch Primary Stream
+              ffmpeg -hide_banner -loglevel info \
+                -user_agent "Mozilla/5.0" \
+                -re -stream_loop -1 \
+                -i "$VIDEO" \
+                -vf "$VF_FILTER" \
+                -c:v libx264 -preset "$PRESET" -b:v 3000k -maxrate 3500k -bufsize 6000k \
+                -pix_fmt yuv420p -g 60 -keyint_min 60 -sc_threshold 0 \
+                -c:a aac -b:a 128k -ar 44100 -ac 2 \
+                -flvflags no_duration_filesize \
+                -f flv "$RTMP_TARGET" &
+
+              # Launch Simulcast 1 if set
+              if [ -n "$S_TARGET" ]; then
+                echo "[INFO] Simulcast 1 Active: Broadcasting to secondary destination..."
                 ffmpeg -hide_banner -loglevel info \
                   -user_agent "Mozilla/5.0" \
                   -re -stream_loop -1 \
                   -i "$VIDEO" \
                   -vf "$VF_FILTER" \
-                  -c:v libx264 -preset veryfast -b:v 3000k -maxrate 3500k -bufsize 6000k \
+                  -c:v libx264 -preset "$PRESET" -b:v 3000k -maxrate 3500k -bufsize 6000k \
                   -pix_fmt yuv420p -g 60 -keyint_min 60 -sc_threshold 0 \
                   -c:a aac -b:a 128k -ar 44100 -ac 2 \
                   -flvflags no_duration_filesize \
-                  -f flv "$RTMP_TARGET"
-              else
-                echo "[INFO] No audio track found in video. Injecting compliant silent AAC audio for YouTube compatibility..."
-                ffmpeg -hide_banner -loglevel info \
-                  -user_agent "Mozilla/5.0" \
-                  -re -stream_loop -1 \
-                  -i "$VIDEO" \
-                  -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 \
-                  -vf "$VF_FILTER" \
-                  -c:v libx264 -preset veryfast -b:v 3000k -maxrate 3500k -bufsize 6000k \
-                  -pix_fmt yuv420p -g 60 -keyint_min 60 -sc_threshold 0 \
-                  -map 0:v:0 -map 1:a:0 -shortest \
-                  -c:a aac -b:a 128k -ar 44100 -ac 2 \
-                  -flvflags no_duration_filesize \
-                  -f flv "$RTMP_TARGET"
+                  -f flv "$S_TARGET" &
               fi
 
+              # Launch Simulcast 2 if set
+              if [ -n "$S2_TARGET" ]; then
+                echo "[INFO] Simulcast 2 Active: Broadcasting to third destination..."
+                ffmpeg -hide_banner -loglevel info \
+                  -user_agent "Mozilla/5.0" \
+                  -re -stream_loop -1 \
+                  -i "$VIDEO" \
+                  -vf "$VF_FILTER" \
+                  -c:v libx264 -preset "$PRESET" -b:v 3000k -maxrate 3500k -bufsize 6000k \
+                  -pix_fmt yuv420p -g 60 -keyint_min 60 -sc_threshold 0 \
+                  -c:a aac -b:a 128k -ar 44100 -ac 2 \
+                  -flvflags no_duration_filesize \
+                  -f flv "$S2_TARGET" &
+              fi
+
+              wait
               local EXIT_CODE=$?
               echo "[WARN] FFmpeg exited with code $EXIT_CODE"
 
@@ -160,6 +218,7 @@ jobs:
           }
 
           # Launch the stream
-          launch_stream "$STREAM_NAME" "$STREAM_URL" "$STREAM_KEY" "$VIDEO_URL" "$ASPECT_RATIO" "$AUTO_RECONNECT"
+          launch_stream "$STREAM_NAME" "$STREAM_URL" "$STREAM_KEY" "$VIDEO_URL" "$ASPECT_RATIO" "$AUTO_RECONNECT" "${CPU_PRESET:-veryfast}" "$SIMULCAST_URL" "$SIMULCAST_KEY" "$SIMULCAST_2_URL" "$SIMULCAST_2_KEY" "$WATERMARK_TEXT"
 
           echo "[INFO] Stream process completed."
+
