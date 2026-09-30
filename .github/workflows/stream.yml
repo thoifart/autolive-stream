@@ -35,27 +35,6 @@ on:
         description: 'Auto Reconnect (true/false)'
         required: false
         default: 'true'
-      # Backwards-compatible inputs for per-channel dispatch
-      c1_name: { description: 'Ch1 Name', required: false, default: '' }
-      c1_url: { description: 'Ch1 URL', required: false, default: '' }
-      c1_key: { description: 'Ch1 Key', required: false, default: '' }
-      c1_video: { description: 'Ch1 Video', required: false, default: '' }
-      c2_name: { description: 'Ch2 Name', required: false, default: '' }
-      c2_url: { description: 'Ch2 URL', required: false, default: '' }
-      c2_key: { description: 'Ch2 Key', required: false, default: '' }
-      c2_video: { description: 'Ch2 Video', required: false, default: '' }
-      c3_name: { description: 'Ch3 Name', required: false, default: '' }
-      c3_url: { description: 'Ch3 URL', required: false, default: '' }
-      c3_key: { description: 'Ch3 Key', required: false, default: '' }
-      c3_video: { description: 'Ch3 Video', required: false, default: '' }
-      c4_name: { description: 'Ch4 Name', required: false, default: '' }
-      c4_url: { description: 'Ch4 URL', required: false, default: '' }
-      c4_key: { description: 'Ch4 Key', required: false, default: '' }
-      c4_video: { description: 'Ch4 Video', required: false, default: '' }
-      c5_name: { description: 'Ch5 Name', required: false, default: '' }
-      c5_url: { description: 'Ch5 URL', required: false, default: '' }
-      c5_key: { description: 'Ch5 Key', required: false, default: '' }
-      c5_video: { description: 'Ch5 Video', required: false, default: '' }
 
 jobs:
   broadcast:
@@ -78,26 +57,6 @@ jobs:
           VIDEO_URL_3: ${{ github.event.inputs.video_url_3 }}
           ASPECT_RATIO: ${{ github.event.inputs.aspect_ratio }}
           AUTO_RECONNECT: ${{ github.event.inputs.auto_reconnect }}
-          C1_NAME: ${{ github.event.inputs.c1_name }}
-          C1_URL: ${{ github.event.inputs.c1_url }}
-          C1_KEY: ${{ github.event.inputs.c1_key }}
-          C1_VIDEO: ${{ github.event.inputs.c1_video }}
-          C2_NAME: ${{ github.event.inputs.c2_name }}
-          C2_URL: ${{ github.event.inputs.c2_url }}
-          C2_KEY: ${{ github.event.inputs.c2_key }}
-          C2_VIDEO: ${{ github.event.inputs.c2_video }}
-          C3_NAME: ${{ github.event.inputs.c3_name }}
-          C3_URL: ${{ github.event.inputs.c3_url }}
-          C3_KEY: ${{ github.event.inputs.c3_key }}
-          C3_VIDEO: ${{ github.event.inputs.c3_video }}
-          C4_NAME: ${{ github.event.inputs.c4_name }}
-          C4_URL: ${{ github.event.inputs.c4_url }}
-          C4_KEY: ${{ github.event.inputs.c4_key }}
-          C4_VIDEO: ${{ github.event.inputs.c4_video }}
-          C5_NAME: ${{ github.event.inputs.c5_name }}
-          C5_URL: ${{ github.event.inputs.c5_url }}
-          C5_KEY: ${{ github.event.inputs.c5_key }}
-          C5_VIDEO: ${{ github.event.inputs.c5_video }}
         run: |
           launch_stream() {
             local NAME="$1"
@@ -197,19 +156,7 @@ jobs:
             done
           }
 
-          # Check if primary stream inputs were provided
-          if [ -n "$STREAM_KEY" ] || [ -n "$STREAM_URL" ]; then
-            launch_stream "$STREAM_NAME" "$STREAM_URL" "$STREAM_KEY" "$VIDEO_URL" "$ASPECT_RATIO" "$AUTO_RECONNECT"
-          elif [ -n "$C1_KEY" ] || [ -n "$C1_URL" ]; then
-            launch_stream "$C1_NAME" "$C1_URL" "$C1_KEY" "$C1_VIDEO" "$ASPECT_RATIO" "$AUTO_RECONNECT" &
-            if [ -n "$C2_KEY" ]; then launch_stream "$C2_NAME" "$C2_URL" "$C2_KEY" "$C2_VIDEO" "$ASPECT_RATIO" "$AUTO_RECONNECT" & fi
-            if [ -n "$C3_KEY" ]; then launch_stream "$C3_NAME" "$C3_URL" "$C3_KEY" "$C3_VIDEO" "$ASPECT_RATIO" "$AUTO_RECONNECT" & fi
-            if [ -n "$C4_KEY" ]; then launch_stream "$C4_NAME" "$C4_URL" "$C4_KEY" "$C4_VIDEO" "$ASPECT_RATIO" "$AUTO_RECONNECT" & fi
-            if [ -n "$C5_KEY" ]; then launch_stream "$C5_NAME" "$C5_URL" "$C5_KEY" "$C5_VIDEO" "$ASPECT_RATIO" "$AUTO_RECONNECT" & fi
-            wait
-          else
-            echo "[ERROR] No valid stream parameters received!"
-            exit 1
-          fi
+          # Launch the stream
+          launch_stream "$STREAM_NAME" "$STREAM_URL" "$STREAM_KEY" "$VIDEO_URL" "$ASPECT_RATIO" "$AUTO_RECONNECT"
 
           echo "[INFO] Stream process completed."
